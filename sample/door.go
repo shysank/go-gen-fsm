@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
-	go_gen_fsm "github.com/cynic89/go-gen-fsm"
+	. "github.com/cynic89/go-gen-fsm"
 	"time"
 )
 
@@ -12,13 +12,13 @@ type Door struct {
 	sofar bytes.Buffer
 }
 
-func (d *Door) Init(args ...interface{}) string {
+func (d *Door) Init(args ...interface{}) State {
 	arg := args[0].([]interface{})
 	d.code = arg[0].(string)
 	return "Locked"
 }
 
-func (d *Door) Locked_button(digit rune) string {
+func (d *Door) Locked_button(digit rune) State {
 	d.sofar.WriteRune(digit)
 	sofarStr := d.sofar.String()
 	fmt.Println(sofarStr)
@@ -39,7 +39,7 @@ func (d *Door) Locked_button(digit rune) string {
 
 }
 
-func (d *Door) Open_timeout() string {
+func (d *Door) Open_timeout() State {
 	fmt.Println("timeout, going back to locked")
 	d.sofar.Reset()
 	return "Locked"
@@ -48,7 +48,7 @@ func (d *Door) Open_timeout() string {
 func main() {
 	d := new(Door)
 
-	genFsm := go_gen_fsm.Start(d, "pass")
+	genFsm := Start(d, "pass")
 
 	genFsm.SendEvent("button", 'p')
 	genFsm.SendEvent("button", 'a')
