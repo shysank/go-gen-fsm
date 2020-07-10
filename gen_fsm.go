@@ -8,8 +8,8 @@ import (
 
 type GenFSM struct {
 	fsm           FSM
-	state         string
-	eventsChannel <-chan Event
+	currentState  string
+	eventsChannel chan Event
 }
 
 type FSM interface {
@@ -21,61 +21,55 @@ type Event struct {
 	data []interface{}
 }
 
-func SendEvent(ch chan<- Event, kind string, data ...interface{}) {
+func (g *GenFSM) SendEvent(kind string, data ...interface{}) {
 	e := Event{kind, data}
-	ch <- e
+	g.eventsChannel <- e
 }
 
-func Start(fsm FSM, args ...interface{}) (chan<- Event, <-chan struct{}) {
+func Start(fsm FSM, args ...interface{}) GenFSM {
 	eventsChannel := make(chan Event)
-	close := make(chan struct{})
 	initialState := fsm.Init(args)
 
-	genFsm := GenFSM{fsm: fsm, state: initialState, eventsChannel: eventsChannel}
+	genFsm := GenFSM{fsm: fsm, currentState: initialState, eventsChannel: eventsChannel}
 
-	fsmType := reflect.TypeOf(fsm)
+	go genFsm.handleEvents()
 
-	go func() {
+	return genFsm
+}
 
-		for {
+func (g *GenFSM) handleEvents() {
+	fsmType := reflect.TypeOf(g.fsm)
+	for {
 
-			select {
+		select {
 
-			case e := <-eventsChannel:
+		case e := <-g.eventsChannel:
 
-				currentState := genFsm.state
-				eventKind := e.kind
-				methodToInvoke := currentState + "_" + eventKind
-				m, present := fsmType.MethodByName(methodToInvoke)
-				if !present {
-					panic(fmt.Sprintf("%v Method not found", methodToInvoke))
-				}
+			eventHandler := inferEventHandler(g.currentState, e.kind)
+			m, present := fsmType.MethodByName(eventHandler)
+			if !present {
+				panic(fmt.Sprintf("Handler not found for event %s in state %s. Is there a method `%s` definded?", e.kind, g.currentState, eventHandler))
+			}
 
-				var values []reflect.Value
-				values = append(values, reflect.ValueOf(fsm))
-				for _, d := range e.data {
-					values = append(values, reflect.ValueOf(d))
-				}
+			values := []reflect.Value{reflect.ValueOf(g.fsm)}
+			for _, d := range e.data {
+				values = append(values, reflect.ValueOf(d))
+			}
 
-				returnValue := m.Func.Call(values)
-				genFsm.state = returnValue[0].String()
+			returnValue := m.Func.Call(values)
+			g.currentState = returnValue[0].String()
 
-				_, present = fsmType.MethodByName(returnValue[0].String() + "_" + "timeout")
-				if present {
-					fmt.Println("Registering timeout")
-					time.AfterFunc(4*time.Second, func() {
-						SendEvent(eventsChannel, "timeout")
-					})
-				}
-
-			case <-time.After(15 * time.Second):
-				close <- struct{}{}
-
-
+			_, present = fsmType.MethodByName(returnValue[0].String() + "_" + "timeout")
+			if present {
+				fmt.Println("Registering timeout")
+				time.AfterFunc(4*time.Second, func() {
+					g.SendEvent("timeout")
+				})
 			}
 		}
+	}
+}
 
-	}()
-
-	return eventsChannel, close
+func inferEventHandler(state, event string) string {
+	return state + "_" + event
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	go_gen_fsm "github.com/cynic89/go-gen-fsm"
+	"time"
 )
 
 type Door struct {
@@ -45,17 +46,15 @@ func (d *Door) Open_timeout() string {
 }
 
 func main() {
-	d := &Door{}
+	d := new(Door)
 
-	ch, clo := go_gen_fsm.Start(d, "pass")
+	genFsm := go_gen_fsm.Start(d, "pass")
 
-	for {
-		go_gen_fsm.SendEvent(ch, "button", 'p')
-		go_gen_fsm.SendEvent(ch, "button", 'a')
-		go_gen_fsm.SendEvent(ch, "button", 's')
-		go_gen_fsm.SendEvent(ch, "button", 's')
+	genFsm.SendEvent("button", 'p')
+	genFsm.SendEvent("button", 'a')
+	genFsm.SendEvent("button", 's')
+	genFsm.SendEvent("button", 's')
 
-		<-clo
-	}
+	time.Sleep(10 * time.Second)
 
 }
