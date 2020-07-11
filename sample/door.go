@@ -1,4 +1,4 @@
-package main
+package sample
 
 import (
 	"bytes"
@@ -18,7 +18,8 @@ func (d *Door) Init(args ...interface{}) State {
 	return "Locked"
 }
 
-func (d *Door) Locked_button(digit rune) State {
+func (d *Door) Locked_Button(digit rune) State {
+	time.Sleep(100 * time.Millisecond)
 	d.sofar.WriteRune(digit)
 	sofarStr := d.sofar.String()
 	fmt.Println(sofarStr)
@@ -39,22 +40,12 @@ func (d *Door) Locked_button(digit rune) State {
 
 }
 
-func (d *Door) Open_timeout() State {
+func (d *Door) Open_Timeout() State {
 	fmt.Println("timeout, going back to locked")
 	d.sofar.Reset()
 	return "Locked"
 }
 
-func main() {
-	d := new(Door)
-
-	genFsm := Start(d, "pass")
-
-	genFsm.SendEvent("button", 'p')
-	genFsm.SendEvent("button", 'a')
-	genFsm.SendEvent("button", 's')
-	genFsm.SendEvent("button", 's')
-
-	time.Sleep(10 * time.Second)
-
+func Button(g *GenFSM, digit rune) {
+	g.SendEvent("Button", digit)
 }

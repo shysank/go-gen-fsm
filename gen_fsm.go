@@ -10,11 +10,13 @@ import (
 )
 
 type GenFSM struct {
-	fsm           FSM
 	currentState  State
+	fsm           FSM
+	handlers      map[State][]EventHandler
 	eventsChannel chan EventMessage
-
-	handlers map[State][]EventHandler
+	doneChannel   chan struct{}
+	errorChannel  chan error
+	timeout       time.Duration
 }
 
 type State string
@@ -29,27 +31,35 @@ type FSM interface {
 }
 
 type EventMessage struct {
-	kind Event
-	data []interface{}
+	Kind Event
+	Data []interface{}
 }
 
 const (
-	TIMEOUT_EVENT = "timeout"
+	TIMEOUT        = "Timeout"
+	NOOP           = "NOOP"
+	DefaultTimeout = 1 * time.Second
 )
 
 func (g *GenFSM) SendEvent(kind Event, data ...interface{}) {
 	g.eventsChannel <- EventMessage{kind, data}
 }
 
-func Start(fsm FSM, args ...interface{}) GenFSM {
+func Start(fsm FSM, args ...interface{}) *GenFSM {
+	handlers := make(map[State][]EventHandler)
 	eventsChannel := make(chan EventMessage)
+	doneChannel := make(chan struct{}, 1)
+	errorChannel := make(chan error, 10)
+
 	initialState := fsm.Init(args)
 
-	genFsm := GenFSM{fsm: fsm, currentState: initialState, eventsChannel: eventsChannel, handlers: make(map[State][]EventHandler)}
+	genFsm := GenFSM{currentState: initialState, fsm: fsm, handlers: handlers, eventsChannel: eventsChannel, doneChannel: doneChannel,
+		errorChannel: errorChannel, timeout: DefaultTimeout}
+
 	genFsm.registerHandlers()
 	go genFsm.handleEvents()
 
-	return genFsm
+	return &genFsm
 }
 
 func (g *GenFSM) registerHandlers() {
@@ -87,20 +97,24 @@ func (g *GenFSM) getHandler(event Event) (EventHandler, error) {
 		}
 	}
 
-	return EventHandler{}, errors.New(fmt.Sprintf("No handlers found for state %s and event %s", g.currentState, event))
+	return EventHandler{}, errors.New(fmt.Sprintf("No handlers found for state `%s` and event `%s` ", g.currentState, event))
 }
 
 func (g *GenFSM) handleEvents() {
 	for {
 		select {
 		case e := <-g.eventsChannel:
-			eventHandler, err := g.getHandler(e.kind)
+			if e.Kind == NOOP {
+				g.doneChannel <- struct{}{}
+			}
+			eventHandler, err := g.getHandler(e.Kind)
 			if err != nil {
-				fmt.Println(err.Error())
+				g.errorChannel <- err
+				continue
 			}
 
 			values := []reflect.Value{reflect.ValueOf(g.fsm)}
-			for _, d := range e.data {
+			for _, d := range e.Data {
 				values = append(values, reflect.ValueOf(d))
 			}
 
@@ -110,14 +124,26 @@ func (g *GenFSM) handleEvents() {
 			g.scheduleTimeout()
 
 		}
+		g.errorChannel <- nil
+
 	}
 }
 
 func (g *GenFSM) scheduleTimeout() {
-	_, err := g.getHandler(TIMEOUT_EVENT)
+	_, err := g.getHandler(TIMEOUT)
 	if err == nil {
-		time.AfterFunc(4*time.Second, func() {
-			g.SendEvent(TIMEOUT_EVENT)
+		time.AfterFunc(DefaultTimeout, func() {
+			fmt.Println("Sending Timeout Event")
+			g.SendEvent(TIMEOUT)
 		})
 	}
+}
+
+func (g *GenFSM) Wait() {
+	g.SendEvent(NOOP)
+	<-g.doneChannel
+}
+
+func (g *GenFSM) GetCurrentState() State {
+	return g.currentState
 }
