@@ -37,7 +37,7 @@ var _ = Describe("Door", func() {
 			sample.Button(genFsm, 's')
 			genFsm.Wait()
 			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Open")))
-			time.Sleep(go_gen_fsm.DefaultTimeout)
+			time.Sleep(2 * time.Second)
 			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Locked")))
 		})
 

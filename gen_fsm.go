@@ -4,19 +4,21 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"regexp"
-	"strings"
 	"time"
 )
 
 type GenFSM struct {
-	currentState  State
-	fsm           FSM
-	handlers      map[State][]EventHandler
+	fsm            FSM
+	handlerMatcher HandlerMatcher
+
+	currentState State
+	handlers     map[State][]EventHandler
+
 	eventsChannel chan EventMessage
 	doneChannel   chan struct{}
 	errorChannel  chan error
-	timeout       time.Duration
+
+	timeout time.Duration
 }
 
 type State string
@@ -41,20 +43,20 @@ const (
 	DefaultTimeout = 1 * time.Second
 )
 
-func (g *GenFSM) SendEvent(kind Event, data ...interface{}) {
-	g.eventsChannel <- EventMessage{kind, data}
-}
-
 func Start(fsm FSM, args ...interface{}) *GenFSM {
 	handlers := make(map[State][]EventHandler)
 	eventsChannel := make(chan EventMessage)
 	doneChannel := make(chan struct{}, 1)
 	errorChannel := make(chan error, 10)
 
+	defaultMatcher := &DefaultMatcher{"_"}
+
 	initialState := fsm.Init(args)
 
-	genFsm := GenFSM{currentState: initialState, fsm: fsm, handlers: handlers, eventsChannel: eventsChannel, doneChannel: doneChannel,
-		errorChannel: errorChannel, timeout: DefaultTimeout}
+	genFsm := GenFSM{fsm: fsm, handlerMatcher: defaultMatcher,
+		currentState: initialState, handlers: handlers, eventsChannel:
+		eventsChannel, doneChannel: doneChannel, errorChannel: errorChannel,
+		timeout: DefaultTimeout}
 
 	genFsm.registerHandlers()
 	go genFsm.handleEvents()
@@ -68,11 +70,9 @@ func (g *GenFSM) registerHandlers() {
 
 	for i := 0; i < nMethods; i++ {
 		m := fsmType.Method(i)
-		match, _ := regexp.Match("[A-Z][A-za-z]*_[A-za-z]+", []byte(m.Name))
+		match := g.handlerMatcher.Matches(m)
 		if match {
-			mParts := strings.Split(m.Name, "_")
-			state := State(mParts[0])
-			event := Event(mParts[1])
+			state, event := g.handlerMatcher.Parts(m)
 			eventHandler := EventHandler{event: event, handlerFunc: m}
 			fmt.Printf("Adding handler %s\n", m.Name)
 
@@ -137,6 +137,10 @@ func (g *GenFSM) scheduleTimeout() {
 			g.SendEvent(TIMEOUT)
 		})
 	}
+}
+
+func (g *GenFSM) SendEvent(kind Event, data ...interface{}) {
+	g.eventsChannel <- EventMessage{kind, data}
 }
 
 func (g *GenFSM) Wait() {
