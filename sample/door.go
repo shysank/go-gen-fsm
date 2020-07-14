@@ -12,31 +12,34 @@ type Door struct {
 	sofar bytes.Buffer
 }
 
+const (
+	LockTimeout = 1 * time.Second
+)
+
 func (d *Door) Init(args ...interface{}) State {
 	arg := args[0].([]interface{})
 	d.code = arg[0].(string)
 	return "Locked"
 }
 
-func (d *Door) Locked_Button(digit rune) State {
+func (d *Door) Locked_Button(digit rune) (State, time.Duration) {
 	time.Sleep(100 * time.Millisecond)
 	d.sofar.WriteRune(digit)
 	sofarStr := d.sofar.String()
-	fmt.Println(sofarStr)
 	if sofarStr == d.code {
-		fmt.Println("Opened")
-		return "Open"
+		fmt.Printf("Opened. Value Entered: %s\n", sofarStr)
+		return "Open", LockTimeout
 	}
 
 	if len(sofarStr) < len(d.code) {
-		fmt.Println("parital unlock")
-		return "Locked"
+		fmt.Printf("Partial Entry. Value Entered: %s\n", sofarStr)
+		return "Locked", -1
 	}
 
-	fmt.Println("Wrong code")
+	fmt.Println("Wrong Code")
 
 	d.sofar.Reset()
-	return "Locked"
+	return "Locked", -1
 
 }
 

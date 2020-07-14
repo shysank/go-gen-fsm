@@ -21,26 +21,35 @@ var _ = Describe("Door", func() {
 			genFsm = go_gen_fsm.Start(subject, "pass")
 		})
 
+		AfterEach(func() {
+			genFsm.Stop()
+		})
+
 		It("Opens door when correct password is given", func() {
-			sample.Button(genFsm, 'p')
-			sample.Button(genFsm, 'a')
-			sample.Button(genFsm, 's')
-			sample.Button(genFsm, 's')
+			enterCode("pass", genFsm)
 			genFsm.Wait()
 			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Open")))
 		})
 
-		It("Opens door and locks after timeout expires", func() {
-			sample.Button(genFsm, 'p')
-			sample.Button(genFsm, 'a')
-			sample.Button(genFsm, 's')
-			sample.Button(genFsm, 's')
+		It("Does not open door when incorrect password is given", func() {
+			enterCode("rong", genFsm)
 			genFsm.Wait()
-			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Open")))
-			time.Sleep(2 * time.Second)
 			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Locked")))
 		})
 
+		It("Opens door and locks after timeout expires", func() {
+			enterCode("pass", genFsm)
+			genFsm.Wait()
+			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Open")))
+			time.Sleep(sample.LockTimeout + 1*time.Second)
+			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Locked")))
+		})
 	})
 
 })
+
+func enterCode(pass string, genFsm *go_gen_fsm.GenFSM) {
+	for _, c := range pass {
+		sample.Button(genFsm, c)
+	}
+}

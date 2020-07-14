@@ -34,7 +34,7 @@ func (d *DefaultMatcher) Matches(m reflect.Method) bool {
 		}
 		
 		if ops == 2 {
-			op2 := m.Type.Out(0).Name()
+			op2 := m.Type.Out(1).Name()
 			if op2 == "Duration" {
 				return true
 			}
