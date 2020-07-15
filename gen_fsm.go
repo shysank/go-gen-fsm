@@ -15,10 +15,15 @@ type GenFSM struct {
 	handlers     map[State][]EventHandler
 
 	eventsChannel chan EventMessage
-	doneChannel   chan struct{}
 	errorChannel  chan error
 
+	sync sync
+
 	timer *time.Timer
+}
+
+type FSM interface {
+	Init(args ...interface{}) State
 }
 
 type State string
@@ -27,14 +32,13 @@ type EventHandler struct {
 	event       Event
 	handlerFunc reflect.Method
 }
-
-type FSM interface {
-	Init(args ...interface{}) State
-}
-
 type EventMessage struct {
 	Kind Event
 	Data []interface{}
+}
+type sync struct {
+	req  chan interface{}
+	resp chan interface{}
 }
 
 const (
@@ -43,24 +47,26 @@ const (
 	STOP    = "Stop"
 )
 
+func newGenFsm() *GenFSM {
+	g := new(GenFSM)
+	g.handlers = make(map[State][]EventHandler)
+	g.eventsChannel = make(chan EventMessage)
+	g.errorChannel = make(chan error, 10)
+	g.sync = sync{make(chan interface{}, 1), make(chan interface{}, 1)}
+	g.handlerMatcher = &DefaultMatcher{"_"}
+	return g
+}
+
 func Start(fsm FSM, args ...interface{}) *GenFSM {
-	handlers := make(map[State][]EventHandler)
-	eventsChannel := make(chan EventMessage)
-	doneChannel := make(chan struct{}, 1)
-	errorChannel := make(chan error, 10)
+	g := newGenFsm()
+	g.fsm = fsm
+	g.currentState = fsm.Init(args)
 
-	defaultMatcher := &DefaultMatcher{"_"}
+	g.registerHandlers()
 
-	initialState := fsm.Init(args)
+	go g.doStart()
 
-	genFsm := GenFSM{fsm: fsm, handlerMatcher: defaultMatcher,
-		currentState: initialState, handlers: handlers, eventsChannel:
-		eventsChannel, doneChannel: doneChannel, errorChannel: errorChannel}
-
-	genFsm.registerHandlers()
-	go genFsm.handleEvents()
-
-	return &genFsm
+	return g
 }
 
 func (g *GenFSM) registerHandlers() {
@@ -76,14 +82,59 @@ func (g *GenFSM) registerHandlers() {
 			fmt.Printf("Adding handler %s\n", m.Name)
 
 			var stateEventHandlers []EventHandler
-			if _, ok := g.handlers[state]; ok {
-				stateEventHandlers = append(stateEventHandlers, eventHandler)
+			if h, ok := g.handlers[state]; ok {
+				stateEventHandlers = append(h, eventHandler)
 			} else {
 				stateEventHandlers = append(stateEventHandlers, eventHandler)
 			}
 			g.handlers[state] = stateEventHandlers
 		}
 	}
+}
+
+func (g *GenFSM) doStart() {
+	var shutdown bool
+	for {
+		if shutdown {
+			break
+		}
+		select {
+		case e, ok := <-g.eventsChannel:
+			if !ok {
+				shutdown = true
+				break
+			}
+			g.handleEvent(e)
+
+		case r, _ := <-g.sync.req:
+			g.handleSync(r)
+		}
+
+	}
+	fmt.Printf("Shutting down GenFsm\n")
+}
+
+func (g *GenFSM) handleEvent(e EventMessage) {
+	eventHandler, err := g.getHandler(e.Kind)
+	if err != nil {
+		fmt.Println(err.Error())
+		g.errorChannel <- err
+		return
+	}
+	g.cancelTimer()
+
+	values := []reflect.Value{reflect.ValueOf(g.fsm)}
+	for _, d := range e.Data {
+		values = append(values, reflect.ValueOf(d))
+	}
+
+	returnValues := eventHandler.handlerFunc.Func.Call(values)
+	g.currentState = State(returnValues[0].String())
+	if len(returnValues) == 2 {
+		timeout := returnValues[1].Interface().(time.Duration)
+		g.scheduleTimeout(timeout)
+	}
+	g.errorChannel <- nil
 }
 
 func (g *GenFSM) getHandler(event Event) (EventHandler, error) {
@@ -101,43 +152,26 @@ func (g *GenFSM) getHandler(event Event) (EventHandler, error) {
 	return EventHandler{}, errors.New(fmt.Sprintf("No handlers found for state `%s` and event `%s` ", g.currentState, event))
 }
 
-func (g *GenFSM) handleEvents() {
-	for {
-		select {
-		case e := <-g.eventsChannel:
-			if e.Kind == NOOP {
-				g.doneChannel <- struct{}{}
-				continue
-			}
-			if e.Kind == STOP {
-				close(g.eventsChannel)
-				close(g.errorChannel)
-				close(g.doneChannel)
-				return
-			}
-
-			eventHandler, err := g.getHandler(e.Kind)
-			if err != nil {
-				g.errorChannel <- err
-				continue
-			}
-
-			values := []reflect.Value{reflect.ValueOf(g.fsm)}
-			for _, d := range e.Data {
-				values = append(values, reflect.ValueOf(d))
-			}
-
-			returnValues := eventHandler.handlerFunc.Func.Call(values)
-			g.currentState = State(returnValues[0].String())
-			if len(returnValues) == 2 {
-				timeout := returnValues[1].Interface().(time.Duration)
-				g.scheduleTimeout(timeout)
-			}
-
+func (g *GenFSM) handleSync(req interface{}) {
+	var resp interface{}
+	if reqStr, ok := req.(string); ok {
+		switch reqStr {
+		case NOOP:
+			resp = "Noop"
+			g.sync.resp <- resp
+		case STOP:
+			resp = "Shutdown"
+			g.sync.resp <- resp
+			g.closeAllChannels()
 		}
-		g.errorChannel <- nil
-
 	}
+}
+
+func (g *GenFSM) closeAllChannels() {
+	close(g.eventsChannel)
+	close(g.errorChannel)
+	close(g.sync.req)
+	close(g.sync.resp)
 }
 
 func (g *GenFSM) scheduleTimeout(timeout time.Duration) {
@@ -154,20 +188,29 @@ func (g *GenFSM) scheduleTimeout(timeout time.Duration) {
 	}()
 }
 
+func (g *GenFSM) cancelTimer()  {
+	if g.timer != nil {
+		g.timer.Stop()
+	}
+}
+
 func (g *GenFSM) SendEvent(kind Event, data ...interface{}) {
 	g.eventsChannel <- EventMessage{kind, data}
 }
 
+func (g *GenFSM) SendSyncReq(req interface{}) (resp interface{}) {
+	g.sync.req <- req
+	resp = <-g.sync.resp
+	return resp
+}
+
 func (g *GenFSM) Wait() {
-	g.SendEvent(NOOP)
-	<-g.doneChannel
+	g.SendSyncReq(NOOP)
 }
 
 func (g *GenFSM) Stop() {
-	g.SendEvent(STOP)
-	if g.timer != nil {
-		g.timer.Stop()
-	}
+	g.cancelTimer()
+	g.SendSyncReq(STOP)
 }
 
 func (g *GenFSM) GetCurrentState() State {

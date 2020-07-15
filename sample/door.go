@@ -44,11 +44,22 @@ func (d *Door) Locked_Button(digit rune) (State, time.Duration) {
 }
 
 func (d *Door) Open_Timeout() State {
-	fmt.Println("timeout, going back to locked")
+	fmt.Printf("Timeout Epired. Going to Lock the door again\n")
 	d.sofar.Reset()
+	return "Locked"
+}
+
+func (d *Door) Open_Reset(pass string) State {
+	fmt.Printf("Resetting lock with new pass %s\n", pass)
+	d.sofar.Reset()
+	d.code = pass
 	return "Locked"
 }
 
 func Button(g *GenFSM, digit rune) {
 	g.SendEvent("Button", digit)
+}
+
+func ResetLock(g *GenFSM, pass string) {
+	g.SendEvent("Reset", pass)
 }

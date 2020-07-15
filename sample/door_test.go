@@ -41,9 +41,22 @@ var _ = Describe("Door", func() {
 			enterCode("pass", genFsm)
 			genFsm.Wait()
 			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Open")))
-			time.Sleep(sample.LockTimeout + 1*time.Second)
+			time.Sleep(sample.LockTimeout + 100*time.Millisecond)
 			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Locked")))
 		})
+
+		It("Opens door and resets lock with new password, cancels auto lock timer", func() {
+			enterCode("pass", genFsm)
+			genFsm.Wait()
+			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Open")))
+			sample.ResetLock(genFsm, "eyes")
+			genFsm.Wait()
+			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Locked")))
+			enterCode("eyes", genFsm)
+			genFsm.Wait()
+			Expect(genFsm.GetCurrentState()).Should(Equal(go_gen_fsm.State("Open")))
+		})
+
 	})
 
 })
