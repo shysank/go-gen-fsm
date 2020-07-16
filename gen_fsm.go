@@ -47,6 +47,18 @@ const (
 	STOP    = "Stop"
 )
 
+func Start(fsm FSM, args ...interface{}) *GenFSM {
+	g := newGenFsm()
+	g.fsm = fsm
+	g.currentState = fsm.Init(args...)
+
+	g.registerHandlers()
+
+	go g.doStart()
+
+	return g
+}
+
 func newGenFsm() *GenFSM {
 	g := new(GenFSM)
 	g.handlers = make(map[State][]EventHandler)
@@ -54,18 +66,6 @@ func newGenFsm() *GenFSM {
 	g.errorChannel = make(chan error, 10)
 	g.sync = sync{make(chan interface{}, 1), make(chan interface{}, 1)}
 	g.handlerMatcher = &DefaultMatcher{"_"}
-	return g
-}
-
-func Start(fsm FSM, args ...interface{}) *GenFSM {
-	g := newGenFsm()
-	g.fsm = fsm
-	g.currentState = fsm.Init(args)
-
-	g.registerHandlers()
-
-	go g.doStart()
-
 	return g
 }
 
@@ -79,7 +79,6 @@ func (g *GenFSM) registerHandlers() {
 		if match {
 			state, event := g.handlerMatcher.Parts(m)
 			eventHandler := EventHandler{event: event, handlerFunc: m}
-			fmt.Printf("Adding handler %s\n", m.Name)
 
 			var stateEventHandlers []EventHandler
 			if h, ok := g.handlers[state]; ok {
@@ -111,7 +110,6 @@ func (g *GenFSM) doStart() {
 		}
 
 	}
-	fmt.Printf("Shutting down GenFsm\n")
 }
 
 func (g *GenFSM) handleEvent(e EventMessage) {
@@ -179,16 +177,14 @@ func (g *GenFSM) scheduleTimeout(timeout time.Duration) {
 		return
 	}
 
-	fmt.Printf("Schedule a timeout event after %s\n", timeout.String())
 	g.timer = time.NewTimer(timeout)
 	go func() {
 		<-g.timer.C
-		fmt.Printf("Sending timeout event\n")
 		g.SendEvent(TIMEOUT)
 	}()
 }
 
-func (g *GenFSM) cancelTimer()  {
+func (g *GenFSM) cancelTimer() {
 	if g.timer != nil {
 		g.timer.Stop()
 	}
