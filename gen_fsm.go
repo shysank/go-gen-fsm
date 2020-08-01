@@ -42,9 +42,11 @@ type sync struct {
 }
 
 const (
-	NOOP    = "NOOP"
-	TIMEOUT = "Timeout"
-	STOP    = "Stop"
+	NOOP         = "NOOP"
+	TIMEOUT      = "Timeout"
+	STOP         = "Stop"
+	genericState = State("Handle")
+	genericEvent = Event("Info")
 )
 
 func Start(fsm FSM, args ...interface{}) *GenFSM {
@@ -115,10 +117,18 @@ func (g *GenFSM) doStart() {
 func (g *GenFSM) handleEvent(e EventMessage) {
 	eventHandler, err := g.getHandler(e.Kind)
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Printf("%s\n", err.Error())
 		g.errorChannel <- err
-		return
+		fmt.Printf("Checking if there is a generic `handle_info` handler\n")
+		eventHandler, err = g.getGenericHandler()
+		if err != nil {
+			fmt.Printf("Cannot find a generic handler `handle_info`\n")
+			g.errorChannel <- err
+			return
+		}
+
 	}
+
 	g.cancelTimer()
 
 	values := []reflect.Value{reflect.ValueOf(g.fsm)}
@@ -135,19 +145,27 @@ func (g *GenFSM) handleEvent(e EventMessage) {
 	g.errorChannel <- nil
 }
 
-func (g *GenFSM) getHandler(event Event) (EventHandler, error) {
-	handlers, ok := g.handlers[g.currentState]
+func getHandler(handlers map[State][]EventHandler, state State, event Event) (EventHandler, error) {
+	stateHandlers, ok := handlers[state]
 	if !ok {
-		return EventHandler{}, errors.New(fmt.Sprintf("No handlers found for state %s", g.currentState))
+		return EventHandler{}, errors.New(fmt.Sprintf("No handlers found for state %s", state))
 	}
 
-	for _, h := range handlers {
+	for _, h := range stateHandlers {
 		if h.event == event {
 			return h, nil
 		}
 	}
 
-	return EventHandler{}, errors.New(fmt.Sprintf("No handlers found for state `%s` and event `%s` ", g.currentState, event))
+	return EventHandler{}, errors.New(fmt.Sprintf("No handlers found for state `%s` and event `%s` ", state, event))
+}
+
+func (g *GenFSM) getHandler(event Event) (EventHandler, error) {
+	return getHandler(g.handlers, g.currentState, event)
+}
+
+func (g *GenFSM) getGenericHandler() (EventHandler, error) {
+	return getHandler(g.handlers, genericState, genericEvent)
 }
 
 func (g *GenFSM) handleSync(req interface{}) {
