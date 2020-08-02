@@ -7,47 +7,59 @@ import (
 	"strings"
 )
 
-type HandlerMatcher interface {
-	Matches(m reflect.Method) bool
-	Parts(m reflect.Method) (State, Event)
+type HandlerResolver struct {
+	nameMatcher NameMatcher
 }
 
-type DefaultMatcher struct {
-	delim string
+type NameMatcher interface {
+	Matches(name string) (bool, State, Event)
 }
 
-func (d *DefaultMatcher) Matches(m reflect.Method) bool {
-	match, err := regexp.Match(d.pattern(), []byte(m.Name))
-	if !match || err != nil {
-		return false
-	}
+func NewHandlerResolver() HandlerResolver {
+	return HandlerResolver{DelimiterMatcher{"_"}}
+}
 
-	ops := m.Type.NumOut()
-	if ops < 1 || ops > 2 {
-		return false
+func (h *HandlerResolver) Resolve(m reflect.Method) (bool, State, Event) {
+	var returnValid bool
+	outputCount := m.Type.NumOut()
+	if outputCount < 1 || outputCount > 2 {
+		returnValid = false
 	}
 
 	op1 := m.Type.Out(0).Name()
 	if op1 == "State" {
-		if ops == 1 {
-			return true
+		if outputCount == 1 {
+			returnValid = true
 		}
-		
-		if ops == 2 {
+
+		if outputCount == 2 {
 			op2 := m.Type.Out(1).Name()
 			if op2 == "Duration" {
-				return true
+				returnValid = true
 			}
 		}
 	}
-	return false
+
+	if !returnValid {
+		return false, State(""), Event("")
+	}
+
+	return h.nameMatcher.Matches(m.Name)
 }
 
-func (d *DefaultMatcher) Parts(m reflect.Method) (State, Event) {
-	parts := strings.Split(m.Name, d.delim)
-	return State(parts[0]), Event(parts[1])
+type DelimiterMatcher struct {
+	delim string
 }
 
-func (d *DefaultMatcher) pattern() string {
-	return fmt.Sprintf("[A-Z][A-za-z]*%s[A-za-z]+", d.delim)
+func (d DelimiterMatcher) Matches(name string) (bool, State, Event) {
+	match, err := regexp.Match(d.pattern(), []byte(name))
+	if !match || err != nil {
+		return false, State(""), Event("")
+	}
+	parts := strings.Split(name, d.delim)
+	return true, State(parts[0]), Event(parts[1])
+}
+
+func (d DelimiterMatcher) pattern() string {
+	return fmt.Sprintf("^[A-Z][A-Za-z]*%s[A-Za-z]+$", d.delim)
 }

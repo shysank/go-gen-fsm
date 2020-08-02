@@ -8,8 +8,8 @@ import (
 )
 
 type GenFSM struct {
-	fsm            FSM
-	handlerMatcher HandlerMatcher
+	fsm             FSM
+	handlerResolver HandlerResolver
 
 	currentState State
 	handlers     map[State][]EventHandler
@@ -67,7 +67,7 @@ func newGenFsm() *GenFSM {
 	g.eventsChannel = make(chan EventMessage)
 	g.errorChannel = make(chan error, 10)
 	g.sync = sync{make(chan interface{}, 1), make(chan interface{}, 1)}
-	g.handlerMatcher = &DefaultMatcher{"_"}
+	g.handlerResolver = NewHandlerResolver()
 	return g
 }
 
@@ -77,9 +77,8 @@ func (g *GenFSM) registerHandlers() {
 
 	for i := 0; i < nMethods; i++ {
 		m := fsmType.Method(i)
-		match := g.handlerMatcher.Matches(m)
+		match, state, event := g.handlerResolver.Resolve(m)
 		if match {
-			state, event := g.handlerMatcher.Parts(m)
 			eventHandler := EventHandler{event: event, handlerFunc: m}
 
 			var stateEventHandlers []EventHandler
