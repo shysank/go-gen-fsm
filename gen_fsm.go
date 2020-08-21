@@ -114,6 +114,13 @@ func (g *GenFSM) doStart() {
 }
 
 func (g *GenFSM) handleEvent(e EventMessage) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			g.errorChannel <- errors.New(r.(string))
+		}
+	}()
+
 	eventHandler, err := g.getHandler(e.Kind)
 	if err != nil {
 		fmt.Printf("%s\n", err.Error())
