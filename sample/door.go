@@ -12,7 +12,7 @@ type Door struct {
 }
 
 const (
-	LockTimeout = 1 * time.Second
+	LockTimeout = 100 * time.Millisecond
 )
 
 func (d *Door) Init(args ...interface{}) State {
@@ -21,7 +21,6 @@ func (d *Door) Init(args ...interface{}) State {
 }
 
 func (d *Door) Locked_Button(digit rune) (State, time.Duration) {
-	time.Sleep(100 * time.Millisecond)
 	d.sofar.WriteRune(digit)
 	sofarStr := d.sofar.String()
 	if sofarStr == d.code {

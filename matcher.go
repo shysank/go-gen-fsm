@@ -61,5 +61,5 @@ func (d DelimiterMatcher) Matches(name string) (bool, State, Event) {
 }
 
 func (d DelimiterMatcher) pattern() string {
-	return fmt.Sprintf("^[A-Z][A-Za-z]*%s[A-Za-z]+$", d.delim)
+	return fmt.Sprintf("^[A-Z][A-Za-z0-9]*%s[A-Za-z][A-Za-z0-9]*$", d.delim)
 }
