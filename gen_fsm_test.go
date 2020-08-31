@@ -99,6 +99,42 @@ var _ = Describe("GenFsm", func() {
 
 	})
 
+	Context("SendSync", func() {
+		BeforeEach(func() {
+			testFsm = &testFsmMock{}
+			testFsm.mock.On("Init", "arg1", "arg2").Return(State1)
+			genFsm = Start(testFsm, "arg1", "arg2")
+			testFsm.mock.On("State1_Event1", 100, true, "SomeString").Return(State2)
+			testFsm.mock.On("State1_Event1", 100, true, "GoToState3").Return(State3)
+		})
+
+		It("Sends no op request and gets response", func() {
+			genFsm.SendEvent(Event1, 100, true, "SomeString")
+			resp := genFsm.SendSyncReq(NOOP)
+			Expect(genFsm.currentState).Should(Equal(State2))
+			Expect(resp).Should(Equal(NOOP))
+			genFsm.Stop()
+		})
+
+		It("Gets 404 if there is no handler registered for the request", func() {
+			genFsm.SendEvent(Event1, 100, true, "SomeString")
+			resp := genFsm.SendSyncReq("Invalid_Req")
+			Expect(genFsm.currentState).Should(Equal(State2))
+			Expect(resp).Should(Equal(404))
+			genFsm.Stop()
+		})
+
+		It("Shuts down gen fsm go routine ", func() {
+			genFsm.SendEvent(Event1, 100, true, "SomeString")
+			resp := genFsm.SendSyncReq(STOP)
+			Expect(genFsm.currentState).Should(Equal(State2))
+			Expect(genFsm.shutdown).Should(Equal(true))
+			Expect(resp).Should(Equal(STOP))
+			Expect(func() { genFsm.SendEvent(Event1) }).To(Panic())
+		})
+
+	})
+
 	Context("Start to finish", func() {
 		BeforeEach(func() {
 			testFsm = &testFsmMock{}

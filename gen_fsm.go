@@ -20,6 +20,7 @@ type GenFSM struct {
 	sync sync
 
 	timer *time.Timer
+	shutdown bool
 }
 
 type FSM interface {
@@ -37,8 +38,9 @@ type EventMessage struct {
 	Data []interface{}
 }
 type sync struct {
-	req  chan interface{}
-	resp chan interface{}
+	req      chan interface{}
+	resp     chan interface{}
+	handlers map[interface{}]func() interface{}
 }
 
 const (
@@ -66,7 +68,7 @@ func newGenFsm() *GenFSM {
 	g.handlers = make(map[State][]EventHandler)
 	g.eventsChannel = make(chan EventMessage)
 	g.errorChannel = make(chan error, 10)
-	g.sync = sync{make(chan interface{}, 1), make(chan interface{}, 1)}
+	g.sync = sync{make(chan interface{}, 1), make(chan interface{}, 1), make(map[interface{}]func() interface{})}
 	g.handlerResolver = NewHandlerResolver()
 	return g
 }
@@ -90,20 +92,16 @@ func (g *GenFSM) registerHandlers() {
 			g.handlers[state] = stateEventHandlers
 		}
 	}
+
+	//Sync handler. For now, just support noop and shutdown
+	g.sync.handlers[NOOP] = noopHandler(g, NOOP)
+	g.sync.handlers[STOP] = noopHandler(g, STOP)
 }
 
 func (g *GenFSM) doStart() {
-	var shutdown bool
-	for {
-		if shutdown {
-			break
-		}
+	for !g.shutdown{
 		select {
-		case e, ok := <-g.eventsChannel:
-			if !ok {
-				shutdown = true
-				break
-			}
+		case e, _ := <-g.eventsChannel:
 			g.handleEvent(e)
 
 		case r, _ := <-g.sync.req:
@@ -175,17 +173,25 @@ func (g *GenFSM) getGenericHandler() (EventHandler, error) {
 }
 
 func (g *GenFSM) handleSync(req interface{}) {
-	var resp interface{}
-	if reqStr, ok := req.(string); ok {
-		switch reqStr {
-		case NOOP:
-			resp = "Noop"
-			g.sync.resp <- resp
-		case STOP:
-			resp = "Shutdown"
-			g.sync.resp <- resp
-			g.closeAllChannels()
-		}
+
+	if h, ok := g.sync.handlers[req]; ok {
+		resp := h()
+		g.sync.resp <- resp
+	}else {
+		fmt.Println(req)
+		g.sync.resp <- 404
+	}
+
+	if req != nil && STOP == req.(string) {
+		g.shutdown = true
+		g.closeAllChannels()
+
+	}
+}
+
+func noopHandler(g *GenFSM, req string) func() interface{}  {
+	return func() interface{} {
+		return req
 	}
 }
 
